@@ -1,0 +1,419 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  ScrollView, 
+  RefreshControl,
+  TouchableOpacity,
+  Alert,
+  SafeAreaView
+} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
+import Button from '../components/Button';
+import ApiService from '../services/api';
+
+const DashboardScreen = ({ navigation }) => {
+  const [user, setUser] = useState(null);
+  const [transfers, setTransfers] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    loadUserData();
+    loadTransfers();
+  }, []);
+
+  const loadUserData = async () => {
+    try {
+      const userData = await AsyncStorage.getItem('userData');
+      if (userData) {
+        setUser(JSON.parse(userData));
+      }
+    } catch (error) {
+      console.error('Error cargando usuario:', error);
+    }
+  };
+
+  const loadTransfers = async () => {
+    try {
+      const response = await ApiService.getTransfers();
+      setTransfers(response.transfers || []);
+      setSummary(response.summary || {});
+    } catch (error) {
+      Alert.alert('Error', 'No se pudieron cargar las transferencias');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadTransfers();
+    setRefreshing(false);
+  };
+
+  const handleLogout = async () => {
+    Alert.alert('Cerrar Sesión', '¿Estás seguro?', [
+      { text: 'Cancelar', style: 'cancel' },
+      { 
+        text: 'Salir', 
+        onPress: async () => {
+          await AsyncStorage.multiRemove(['authToken', 'userData']);
+          navigation.replace('Login');
+        }
+      }
+    ]);
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('es-MX', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(amount);
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'completed': return '#28a745';
+      case 'processing': return '#ffc107';
+      case 'failed': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  const getStatusText = (status) => {
+    switch (status) {
+      case 'completed': return 'Completada';
+      case 'processing': return 'Procesando';
+      case 'failed': return 'Fallida';
+      case 'pending': return 'Pendiente';
+      default: return 'Desconocido';
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView 
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {/* Header con saludo */}
+        <LinearGradient
+          colors={['#007AFF', '#0056CC']}
+          style={styles.header}
+        >
+          <View style={styles.headerContent}>
+            <Text style={styles.greeting}>
+              ¡Hola, {user?.full_name?.split(' ')[0] || 'Usuario'}! 👋
+            </Text>
+            <Text style={styles.headerSubtitle}>
+              Ahorra dinero en cada envío
+            </Text>
+            <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+              <Text style={styles.logoutText}>Salir</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+
+        {/* Resumen de ahorros */}
+        <View style={styles.summaryContainer}>
+          <LinearGradient
+            colors={['#28a745', '#20c997']}
+            style={styles.savingsCard}
+          >
+            <Text style={styles.savingsTitle}>Total Ahorrado</Text>
+            <Text style={styles.savingsAmount}>
+              {formatCurrency(summary.total_saved || 0)}
+            </Text>
+            <Text style={styles.savingsSubtitle}>
+              vs Western Union
+            </Text>
+          </LinearGradient>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <Text style={styles.statNumber}>{summary.total_transfers || 0}</Text>
+              <Text style={styles.statLabel}>Envíos</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statNumber}>
+                {formatCurrency(summary.total_sent || 0)}
+              </Text>
+              <Text style={styles.statLabel}>Total Enviado</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Botón principal */}
+        <View style={styles.actionContainer}>
+          <Button
+            title="💸 Enviar Dinero"
+            onPress={() => navigation.navigate('SendMoney')}
+            variant="success"
+            style={styles.sendButton}
+          />
+        </View>
+
+        {/* Historial reciente */}
+        <View style={styles.historyContainer}>
+          <Text style={styles.historyTitle}>Envíos Recientes</Text>
+          
+          {loading ? (
+            <Text style={styles.loadingText}>Cargando...</Text>
+          ) : transfers.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>
+                🚀 ¡Haz tu primer envío!
+              </Text>
+              <Text style={styles.emptySubtext}>
+                Ahorra hasta 90% en comisiones
+              </Text>
+            </View>
+          ) : (
+            transfers.slice(0, 5).map((transfer) => (
+              <TouchableOpacity
+                key={transfer.id}
+                style={styles.transferItem}
+                onPress={() => navigation.navigate('TransferDetails', { transferId: transfer.id })}
+              >
+                <View style={styles.transferInfo}>
+                  <Text style={styles.transferRecipient}>
+                    Para: {transfer.recipient_name}
+                  </Text>
+                  <Text style={styles.transferAmount}>
+                    {formatCurrency(transfer.amount)}
+                  </Text>
+                  <Text style={styles.transferDate}>
+                    {new Date(transfer.created_at).toLocaleDateString('es-MX')}
+                  </Text>
+                </View>
+                <View style={styles.transferStatus}>
+                  <View 
+                    style={[
+                      styles.statusBadge, 
+                      { backgroundColor: getStatusColor(transfer.status) }
+                    ]}
+                  >
+                    <Text style={styles.statusText}>
+                      {getStatusText(transfer.status)}
+                    </Text>
+                  </View>
+                  {transfer.savings > 0 && (
+                    <Text style={styles.savingsText}>
+                      Ahorraste {formatCurrency(transfer.savings)}
+                    </Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+
+          {transfers.length > 5 && (
+            <TouchableOpacity style={styles.viewAllButton}>
+              <Text style={styles.viewAllText}>Ver todos los envíos</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  header: {
+    paddingTop: 20,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+  },
+  headerContent: {
+    alignItems: 'center',
+    position: 'relative',
+  },
+  greeting: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 5,
+  },
+  headerSubtitle: {
+    fontSize: 16,
+    color: '#E6F3FF',
+  },
+  logoutButton: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    padding: 8,
+  },
+  logoutText: {
+    color: 'white',
+    fontSize: 16,
+    textDecorationLine: 'underline',
+  },
+  summaryContainer: {
+    padding: 20,
+    marginTop: -20,
+  },
+  savingsCard: {
+    borderRadius: 15,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  savingsTitle: {
+    color: 'white',
+    fontSize: 16,
+    marginBottom: 5,
+  },
+  savingsAmount: {
+    color: 'white',
+    fontSize: 32,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  savingsSubtitle: {
+    color: '#E6FFE6',
+    fontSize: 14,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 15,
+    alignItems: 'center',
+    marginHorizontal: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  statNumber: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 5,
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  actionContainer: {
+    padding: 20,
+  },
+  sendButton: {
+    paddingVertical: 20,
+    borderRadius: 15,
+  },
+  historyContainer: {
+    padding: 20,
+  },
+  historyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 15,
+  },
+  loadingText: {
+    textAlign: 'center',
+    color: '#666',
+    fontSize: 16,
+    padding: 20,
+  },
+  emptyState: {
+    alignItems: 'center',
+    padding: 30,
+  },
+  emptyText: {
+    fontSize: 18,
+    color: '#333',
+    marginBottom: 5,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#666',
+  },
+  transferItem: {
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  transferInfo: {
+    flex: 1,
+  },
+  transferRecipient: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  transferAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginBottom: 4,
+  },
+  transferDate: {
+    fontSize: 14,
+    color: '#666',
+  },
+  transferStatus: {
+    alignItems: 'flex-end',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  savingsText: {
+    fontSize: 12,
+    color: '#28a745',
+    fontWeight: '500',
+  },
+  viewAllButton: {
+    alignItems: 'center',
+    padding: 15,
+  },
+  viewAllText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+});
+
+export default DashboardScreen;
