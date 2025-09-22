@@ -17,7 +17,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Configuración de base de datos para HACKATEC_IPN
+// Configuración de base de datos
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
@@ -37,8 +37,7 @@ const authenticateToken = (req, res, next) => {
   
   if (!token) {
     return res.status(401).json({ 
-      error: 'Token de acceso requerido',
-      message: 'Debe incluir Authorization: Bearer <token>'
+      error: 'Token de acceso requerido'
     });
   }
   
@@ -49,13 +48,12 @@ const authenticateToken = (req, res, next) => {
   } catch (error) {
     console.error('Error validando token:', error.message);
     res.status(403).json({ 
-      error: 'Token inválido o expirado',
-      message: 'Por favor inicia sesión nuevamente'
+      error: 'Token inválido o expirado'
     });
   }
 };
 
-// Test de conexión a base de datos
+// Test de conexión
 const testConnection = async () => {
   try {
     const connection = await pool.getConnection();
@@ -66,7 +64,7 @@ const testConnection = async () => {
   }
 };
 
-// ============ RUTAS DE LA API ============
+// RUTAS
 
 // Health check
 app.get('/api/health', async (req, res) => {
@@ -85,22 +83,19 @@ app.get('/api/health', async (req, res) => {
     timestamp: new Date().toISOString(),
     database: dbStatus,
     interledger_ready: true,
-    project: 'HACKATEC_IPN',
-    version: '1.0.0'
+    project: 'HACKATEC_IPN'
   });
 });
 
-// Registro de usuario
+// Registro
 app.post('/api/register', async (req, res) => {
   let connection;
   try {
     const { email, password, full_name, phone, country } = req.body;
     
-    // Validaciones básicas
     if (!email || !password || !full_name || !country) {
       return res.status(400).json({ 
-        error: 'Datos requeridos faltantes',
-        required: ['email', 'password', 'full_name', 'country']
+        error: 'Datos requeridos faltantes'
       });
     }
 
@@ -112,39 +107,32 @@ app.post('/api/register', async (req, res) => {
     
     connection = await pool.getConnection();
     
-    // Verificar si el usuario ya existe
     const [existingUsers] = await connection.execute(
-      'SELECT id, email FROM users WHERE email = ?', 
+      'SELECT id FROM users WHERE email = ?', 
       [email]
     );
     
     if (existingUsers.length > 0) {
       return res.status(400).json({ 
-        error: 'El usuario ya existe',
-        message: 'Ya existe una cuenta con este email'
+        error: 'El usuario ya existe'
       });
     }
     
-    // Encriptar contraseña
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const hashedPassword = await bcrypt.hash(password, 10);
     
-    // Crear usuario
     const [result] = await connection.execute(
       'INSERT INTO users (email, password, full_name, phone, country) VALUES (?, ?, ?, ?, ?)',
       [email, hashedPassword, full_name, phone || null, country]
     );
     
-    // Crear wallet address con Interledger
+    // Crear wallet
     const walletAddress = await InterledgerService.createWalletAddress(result.insertId, email);
     
-    // Actualizar usuario con wallet address
     await connection.execute(
       'UPDATE users SET wallet_address = ? WHERE id = ?',
       [walletAddress.url, result.insertId]
     );
     
-    // Generar JWT token
     const token = jwt.sign(
       { 
         id: result.insertId, 
@@ -155,7 +143,7 @@ app.post('/api/register', async (req, res) => {
       { expiresIn: '24h' }
     );
     
-    console.log(`✅ Usuario registrado: ${email} (ID: ${result.insertId})`);
+    console.log(`✅ Usuario registrado: ${email}`);
     
     res.status(201).json({
       success: true,
@@ -165,25 +153,21 @@ app.post('/api/register', async (req, res) => {
         id: result.insertId, 
         email, 
         full_name,
-        phone,
-        country,
-        wallet_address: walletAddress.url,
-        created_at: new Date().toISOString()
+        wallet_address: walletAddress.url
       }
     });
     
   } catch (error) {
     console.error('Error en registro:', error);
     res.status(500).json({ 
-      error: 'Error interno del servidor',
-      message: 'No se pudo crear la cuenta. Intenta nuevamente.'
+      error: 'Error interno del servidor'
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-// Login de usuario
+// Login
 app.post('/api/login', async (req, res) => {
   let connection;
   try {
@@ -197,32 +181,26 @@ app.post('/api/login', async (req, res) => {
     
     connection = await pool.getConnection();
     
-    // Buscar usuario
     const [users] = await connection.execute(
-      'SELECT id, email, password, full_name, phone, country, wallet_address, created_at FROM users WHERE email = ?', 
+      'SELECT * FROM users WHERE email = ?', 
       [email]
     );
     
     if (users.length === 0) {
       return res.status(401).json({ 
-        error: 'Credenciales incorrectas',
-        message: 'Usuario no encontrado'
+        error: 'Usuario no encontrado'
       });
     }
     
     const user = users[0];
-    
-    // Verificar contraseña
     const isPasswordValid = await bcrypt.compare(password, user.password);
     
     if (!isPasswordValid) {
       return res.status(401).json({ 
-        error: 'Credenciales incorrectas',
-        message: 'Contraseña incorrecta'
+        error: 'Contraseña incorrecta'
       });
     }
     
-    // Generar token
     const token = jwt.sign(
       { 
         id: user.id, 
@@ -243,67 +221,50 @@ app.post('/api/login', async (req, res) => {
         id: user.id, 
         email: user.email, 
         full_name: user.full_name,
-        phone: user.phone,
-        country: user.country,
-        wallet_address: user.wallet_address,
-        member_since: user.created_at
+        wallet_address: user.wallet_address
       }
     });
     
   } catch (error) {
     console.error('Error en login:', error);
     res.status(500).json({ 
-      error: 'Error interno del servidor',
-      message: 'No se pudo procesar el login'
+      error: 'Error interno del servidor'
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-// Crear nueva transferencia
+// Crear transferencia
 app.post('/api/transfers', authenticateToken, async (req, res) => {
   let connection;
   try {
     const { recipient_email, recipient_name, amount } = req.body;
     const sender_id = req.user.id;
     
-    // Validaciones
     if (!recipient_email || !recipient_name || !amount) {
       return res.status(400).json({ 
-        error: 'Datos requeridos faltantes',
-        required: ['recipient_email', 'recipient_name', 'amount']
+        error: 'Datos requeridos faltantes'
       });
     }
 
     const transferAmount = parseFloat(amount);
     if (transferAmount < 1 || transferAmount > 10000) {
       return res.status(400).json({ 
-        error: 'Monto inválido',
-        message: 'El monto debe estar entre $1 y $10,000 USD'
+        error: 'Monto debe estar entre $1 y $10,000 USD'
       });
     }
     
     connection = await pool.getConnection();
     
-    // Obtener información del remitente
     const [senders] = await connection.execute(
       'SELECT * FROM users WHERE id = ?', 
       [sender_id]
     );
     
-    if (senders.length === 0) {
-      return res.status(404).json({ error: 'Usuario remitente no encontrado' });
-    }
-    
     const sender = senders[0];
-    
-    // Calcular fees usando Interledger Service
     const fees = InterledgerService.calculateFees(transferAmount);
     
-    console.log(`💰 Calculando fees para $${transferAmount}:`, fees);
-    
-    // Verificar/crear wallet del remitente
     let senderWallet = sender.wallet_address;
     if (!senderWallet) {
       const walletData = await InterledgerService.createWalletAddress(sender_id, sender.email);
@@ -315,14 +276,10 @@ app.post('/api/transfers', authenticateToken, async (req, res) => {
       );
     }
     
-    // Crear wallet para el destinatario
     const receiverWallet = await InterledgerService.createWalletAddress(
       `recipient_${Date.now()}`, 
       recipient_email
     );
-    
-    // Simular proceso Interledger
-    console.log(`🚀 Iniciando transferencia Interledger: $${transferAmount} USD`);
     
     const incomingPayment = await InterledgerService.createIncomingPayment(
       receiverWallet.url, 
@@ -335,7 +292,6 @@ app.post('/api/transfers', authenticateToken, async (req, res) => {
       transferAmount
     );
     
-    // Guardar transferencia en base de datos
     const [result] = await connection.execute(
       `INSERT INTO transfers 
        (sender_id, recipient_email, recipient_name, amount, currency, status, 
@@ -360,7 +316,7 @@ app.post('/api/transfers', authenticateToken, async (req, res) => {
     
     console.log(`✅ Transferencia creada con ID: ${result.insertId}`);
     
-    // Simular completación de transferencia después de 5 segundos
+    // Auto-completar después de 5 segundos
     setTimeout(async () => {
       try {
         const conn = await pool.getConnection();
@@ -369,7 +325,7 @@ app.post('/api/transfers', authenticateToken, async (req, res) => {
           ['completed', result.insertId]
         );
         conn.release();
-        console.log(`✅ Transferencia ${result.insertId} completada automáticamente`);
+        console.log(`✅ Transferencia ${result.insertId} completada`);
       } catch (err) {
         console.error('Error actualizando transferencia:', err);
       }
@@ -378,83 +334,64 @@ app.post('/api/transfers', authenticateToken, async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Transferencia iniciada exitosamente',
-      transfer: {
-        id: result.insertId,
-        status: 'processing',
-        amount: transferAmount,
-        currency: 'USD',
-        recipient_name: recipient_name,
-        recipient_email: recipient_email,
-        fees: fees,
-        interledger_payment_id: outgoingPayment.id,
-        estimated_completion: '2-5 minutos',
-        created_at: new Date().toISOString()
-      }
+      transfer_id: result.insertId,
+      status: 'processing',
+      fees: fees,
+      interledger_payment_id: outgoingPayment.id,
+      estimated_completion: '2-5 minutos'
     });
     
   } catch (error) {
     console.error('Error creando transferencia:', error);
     res.status(500).json({ 
-      error: 'Error procesando transferencia',
-      message: error.message
+      error: 'Error procesando transferencia'
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-// Obtener historial de transferencias del usuario
+// Obtener transferencias
 app.get('/api/transfers', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await pool.getConnection();
     
-    // Obtener todas las transferencias del usuario
     const [transfers] = await connection.execute(
-      `SELECT id, recipient_email, recipient_name, amount, currency, status, 
-              traditional_fee, our_fee, savings, interledger_payment_id,
-              created_at, completed_at
-       FROM transfers 
-       WHERE sender_id = ? 
-       ORDER BY created_at DESC`,
+      `SELECT * FROM transfers WHERE sender_id = ? ORDER BY created_at DESC`,
       [req.user.id]
     );
     
-    // Calcular resumen
     const completedTransfers = transfers.filter(t => t.status === 'completed');
     const summary = {
       total_transfers: transfers.length,
-      completed_transfers: completedTransfers.length,
       total_sent: completedTransfers.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0),
-      total_saved: completedTransfers.reduce((sum, t) => sum + parseFloat(t.savings || 0), 0),
-      total_fees_paid: completedTransfers.reduce((sum, t) => sum + parseFloat(t.our_fee || 0), 0)
+      total_saved: completedTransfers.reduce((sum, t) => sum + parseFloat(t.savings || 0), 0)
     };
     
     res.json({ 
       success: true,
       transfers: transfers,
-      summary: summary,
-      user_id: req.user.id
+      summary: summary
     });
     
   } catch (error) {
     console.error('Error obteniendo transferencias:', error);
     res.status(500).json({ 
-      error: 'Error obteniendo historial',
-      message: 'No se pudo cargar el historial de transferencias'
+      error: 'Error obteniendo historial'
     });
   } finally {
     if (connection) connection.release();
   }
 });
 
-// Obtener detalles de una transferencia específica
+// Obtener transferencia específica
 app.get('/api/transfers/:id', authenticateToken, async (req, res) => {
   let connection;
   try {
     const transferId = parseInt(req.params.id);
     
-    if (!transferId || transferId < 1) {
+    if (!transferId) {
       return res.status(400).json({ 
         error: 'ID de transferencia inválido'
       });
@@ -469,83 +406,28 @@ app.get('/api/transfers/:id', authenticateToken, async (req, res) => {
     
     if (transfers.length === 0) {
       return res.status(404).json({ 
-        error: 'Transferencia no encontrada',
-        message: 'La transferencia no existe o no tienes permisos para verla'
+        error: 'Transferencia no encontrada'
       });
     }
     
-    const transfer = transfers[0];
-    
     res.json({ 
       success: true,
-      transfer: transfer,
+      transfer: transfers[0],
       interledger_info: {
         network: 'Interledger Protocol',
-        protocol: 'Open Payments v1.0',
-        estimated_time: '2-5 minutos',
-        wallet_sender: transfer.wallet_address_sender,
-        wallet_recipient: transfer.wallet_address_recipient
+        protocol: 'Open Payments',
+        estimated_time: '2-5 minutes'
       }
     });
     
   } catch (error) {
     console.error('Error obteniendo transferencia:', error);
     res.status(500).json({ 
-      error: 'Error obteniendo detalles',
-      message: 'No se pudieron cargar los detalles de la transferencia'
+      error: 'Error obteniendo detalles'
     });
   } finally {
     if (connection) connection.release();
   }
-});
-
-// Ruta para obtener perfil del usuario
-app.get('/api/profile', authenticateToken, async (req, res) => {
-  let connection;
-  try {
-    connection = await pool.getConnection();
-    
-    const [users] = await connection.execute(
-      'SELECT id, email, full_name, phone, country, wallet_address, created_at FROM users WHERE id = ?',
-      [req.user.id]
-    );
-    
-    if (users.length === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
-    
-    res.json({
-      success: true,
-      user: users[0]
-    });
-    
-  } catch (error) {
-    console.error('Error obteniendo perfil:', error);
-    res.status(500).json({ error: 'Error obteniendo perfil' });
-  } finally {
-    if (connection) connection.release();
-  }
-});
-
-// Manejador de rutas no encontradas
-app.all('*', (req, res) => {
-  res.status(404).json({
-    error: 'Endpoint no encontrado',
-    message: `La ruta ${req.method} ${req.originalUrl} no existe`,
-    available_endpoints: {
-      'GET': ['/api/health', '/api/transfers', '/api/transfers/:id', '/api/profile'],
-      'POST': ['/api/register', '/api/login', '/api/transfers']
-    }
-  });
-});
-
-// Manejador global de errores
-app.use((error, req, res, next) => {
-  console.error('Error no manejado:', error);
-  res.status(500).json({
-    error: 'Error interno del servidor',
-    message: 'Algo salió mal. Por favor intenta nuevamente.'
-  });
 });
 
 // Iniciar servidor
@@ -555,18 +437,10 @@ const startServer = async () => {
     
     app.listen(PORT, () => {
       console.log(`\n🚀 MiRemesa API - HACKATEC_IPN`);
-      console.log(`📍 Servidor corriendo en: http://localhost:${PORT}`);
-      console.log(`🏥 Health check: http://localhost:${PORT}/api/health`);
-      console.log(`💾 Base de datos: remittance_db`);
-      console.log(`🕒 Iniciado: ${new Date().toISOString()}`);
-      console.log(`\n📋 Endpoints disponibles:`);
-      console.log(`   POST /api/register   - Registro de usuarios`);
-      console.log(`   POST /api/login      - Login de usuarios`);
-      console.log(`   POST /api/transfers  - Crear transferencia`);
-      console.log(`   GET  /api/transfers  - Historial de transferencias`);
-      console.log(`   GET  /api/transfers/:id - Detalles de transferencia`);
-      console.log(`   GET  /api/profile    - Perfil de usuario`);
-      console.log(`   GET  /api/health     - Estado del servidor\n`);
+      console.log(`📍 Servidor: http://localhost:${PORT}`);
+      console.log(`🏥 Health: http://localhost:${PORT}/api/health`);
+      console.log(`💾 Database: remittance_db`);
+      console.log(`🕒 Started: ${new Date().toISOString()}\n`);
     });
     
   } catch (error) {
