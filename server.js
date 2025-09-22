@@ -528,10 +528,10 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
 });
 
 // Manejador de rutas no encontradas
-app.use('*', (req, res) => {
+app.all('*', (req, res) => {
   res.status(404).json({
     error: 'Endpoint no encontrado',
-    message: `La ruta ${req.method} ${req.baseUrl} no existe`,
+    message: `La ruta ${req.method} ${req.originalUrl} no existe`,
     available_endpoints: {
       'GET': ['/api/health', '/api/transfers', '/api/transfers/:id', '/api/profile'],
       'POST': ['/api/register', '/api/login', '/api/transfers']
